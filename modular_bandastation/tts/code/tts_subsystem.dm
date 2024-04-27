@@ -56,7 +56,7 @@ SUBSYSTEM_DEF(tts220)
 	/// Lazy list of request that need to performed to TTS provider API
 	VAR_PRIVATE/list/tts_requests_queue
 
-	/// List of currently existing binding of atom and sound channel: `atom` => `sound_channel`. SS220 TODO: free channel when atom is detroyed and may be on some other circumstances
+	/// List of currently existing binding of atom and sound channel: `atom` => `sound_channel`.
 	VAR_PRIVATE/list/tts_local_channels_by_owner = list()
 
 	/// Mapping of BYOND gender to TTS gender
@@ -124,10 +124,6 @@ SUBSYSTEM_DEF(tts220)
 	load_replacements()
 
 	return SS_INIT_SUCCESS
-
-/datum/controller/subsystem/tts220/pause()
-	. = ..()
-	is_enabled = FALSE
 
 /datum/controller/subsystem/tts220/fire()
 	if(last_network_fire + 1 SECONDS <= world.time)
@@ -352,7 +348,12 @@ SUBSYSTEM_DEF(tts220)
 	queue_sound_effect_processing(pure_filename, effect, filename2play, output_tts_cb)
 
 /datum/controller/subsystem/tts220/proc/output_tts(atom/speaker, mob/listener, filename2play, is_local = TRUE, preSFX = null, postSFX = null)
-	var/volume = listener?.client?.prefs?.read_preference(/datum/preference/numeric/sound_tts_volume)
+	var/volume
+	if(findtext(filename2play, "radio"))
+		volume = listener?.client?.prefs?.read_preference(/datum/preference/numeric/sound_tts_volume_radio)
+	else
+		volume = listener?.client?.prefs?.read_preference(/datum/preference/numeric/sound_tts_volume)
+
 	if(!volume)
 		return
 
@@ -360,13 +361,11 @@ SUBSYSTEM_DEF(tts220)
 
 	var/sound/output = sound(filename2play)
 	output.status = SOUND_STREAM
+	output.volume = volume
 	if(!is_local || isnull(speaker))
 		output.wait = TRUE
-		output.volume = volume * 0.75 // non-local is slightly less loud // TODO220: Make volume different
 		output.environment = SOUND_ENVIRONMENT_NONE
-
-		if(output.volume <= 0)
-			return
+		output.channel = CHANNEL_TTS_RADIO
 
 		play_sfx_if_exists(listener, preSFX, output)
 		SEND_SOUND(listener, output)
@@ -376,10 +375,25 @@ SUBSYSTEM_DEF(tts220)
 
 	play_sfx_if_exists(listener, preSFX, output)
 
-	output = listener.playsound_local(turf_source, output, volume)
-
-	if(!output || output.volume <= 0)
-		return
+	// Reserve channel only for players
+	if(ismob(speaker))
+		var/mob/speaking_mob = speaker
+		if(speaking_mob.client)
+			output.channel = get_local_channel_by_owner(speaker)
+			output.wait = TRUE
+	listener.playsound_local(
+		turf_source,
+		vol = output.volume,
+		falloff_exponent = SOUND_FALLOFF_EXPONENT,
+		channel = output.channel,
+		pressure_affected = TRUE,
+		sound_to_use = output,
+		max_distance = SOUND_RANGE,
+		falloff_distance = SOUND_DEFAULT_FALLOFF_DISTANCE,
+		distance_multiplier = 1,
+		use_reverb = TRUE,
+		wait = output.wait
+	)
 
 	play_sfx_if_exists(listener, postSFX, output)
 
@@ -394,6 +408,19 @@ SUBSYSTEM_DEF(tts220)
 	output.volume = volume
 	output.environment = environment
 	SEND_SOUND(listener, output)
+
+/datum/controller/subsystem/tts220/proc/get_local_channel_by_owner(owner)
+	var/channel = tts_local_channels_by_owner[owner]
+	if(isnull(channel))
+		channel = SSsounds.reserve_sound_channel()
+		tts_local_channels_by_owner[owner] = channel
+		RegisterSignal(owner, COMSIG_QDELETING, PROC_REF(clear_channel))
+	return channel
+
+/datum/controller/subsystem/tts220/proc/clear_channel(owner)
+	SIGNAL_HANDLER
+
+	tts_local_channels_by_owner -= owner
 
 /datum/controller/subsystem/tts220/proc/cleanup_tts_file(filename)
 	fdel(filename)
@@ -463,6 +490,7 @@ SUBSYSTEM_DEF(tts220)
 /datum/controller/subsystem/tts220/proc/pick_tts_seed_by_gender(gender)
 	var/tts_gender = SStts220.get_tts_gender(gender)
 	var/tts_by_gender = LAZYACCESS(SStts220.tts_seeds_by_gender, tts_gender)
+	tts_by_gender |= LAZYACCESS(SStts220.tts_seeds_by_gender, TTS_GENDER_ANY)
 	if(!length(tts_by_gender))
 		logger.Log(LOG_CATEGORY_DEBUG, "No tts for gender `[gender]`, tts_gender: `[tts_gender]`")
 		return null

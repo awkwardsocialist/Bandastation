@@ -1,4 +1,4 @@
-import { filterMap } from 'common/collections';
+import { filter } from 'common/collections';
 import { useState } from 'react';
 
 import { useBackend } from '../../backend';
@@ -23,13 +23,9 @@ function getCorrespondingPreferences(
   relevant_preferences: Record<string, string>,
 ) {
   return Object.fromEntries(
-    filterMap(Object.keys(relevant_preferences), (key) => {
-      if (!customization_options.includes(key)) {
-        return undefined;
-      }
-
-      return [key, relevant_preferences[key]];
-    }),
+    filter(Object.entries(relevant_preferences), ([key, value]) =>
+      customization_options.includes(key),
+    ),
   );
 }
 
@@ -391,7 +387,7 @@ export function QuirksPage(props) {
         };
 
         return (
-          <Stack align="center" fill>
+          <Stack fill>
             <Stack.Item basis="50%">
               <Stack vertical fill align="center">
                 <Stack.Item>
@@ -450,7 +446,7 @@ export function QuirksPage(props) {
               </Stack>
             </Stack.Item>
 
-            <Stack.Item>
+            <Stack.Item align="center">
               <Icon name="exchange-alt" size={1.5} ml={2} mr={2} />
             </Stack.Item>
 
